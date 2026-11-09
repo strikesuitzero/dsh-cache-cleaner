@@ -19,6 +19,7 @@
     "locale",
     "icon.svg",
     "README.md",
+    "README.zh-CN.md",
     "LICENSE"
   ],
   "dsh": {
@@ -37,6 +38,14 @@
   },
   "icon": "./icon.svg",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strikesuitzero/dsh-cache-cleaner.git"
+  },
+  "homepage": "https://github.com/strikesuitzero/dsh-cache-cleaner#readme",
+  "bugs": {
+    "url": "https://github.com/strikesuitzero/dsh-cache-cleaner/issues"
+  },
   "keywords": [
     "dsh",
     "dsh-plugin",

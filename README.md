@@ -1,8 +1,10 @@
 # dsh-cache-cleaner
 
+**English** | [简体中文](README.zh-CN.md)
+
 Move the DeepSeek Harness temp cache to a configurable location, clean it with a strict allowlist, and manage archived sessions and workspace temp/archive folders — from a settings panel, CLI, or agent tools.
 
-把 DeepSeek Harness 的临时缓存迁到可配置的位置，按「天数 + 配额」双闸门白名单清理，并管理已归档会话与工作区临时/归档目录。提供设置页、CLI 与 agent 工具三种入口。
+> The plugin is **bilingual**: the settings panel follows the DSH UI language, and every agent-tool description carries both English and Chinese text.
 
 ## Features
 
@@ -100,7 +102,7 @@ Offline registry edits (when the host is not running) require `--offline-registr
 - Temp-directory ownership is **inferred from a creation-time window**, not stored by the host; the report labels it `confidence: "time-window"`.
 - Attachment and projection-cache ownership is exact: a shared attachment referenced by a retained session is never deleted.
 - The host has no session-delete API; deletion removes the log directory and then uses `unarchiveSession` + detach on the workspace registry. Untracked/ghost sessions have no registry entry to clean.
-- The settings panel talks to `/api/cache-guard.api` (a Fetch route registered by the host half). Direct unauthenticated HTTP probes receive `401` from the host's browser-auth fence even when the route exists; verification is done in the browser with the signed cookie.
+- The settings panel talks to `/api/cache-cleaner.api` (a Fetch route registered by the host half). Direct unauthenticated HTTP probes receive `401` from the host's browser-auth fence even when the route exists; verification is done in the browser with the signed cookie.
 - Cleanup verifies that free space actually increased; on systems whose delete implementation moves files to the recycle bin, the report warns instead of claiming success.
 
 ## Tests

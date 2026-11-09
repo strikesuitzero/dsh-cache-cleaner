@@ -1275,8 +1275,7 @@ export async function apply(ctx, config) {
     try {
       tools.register({
         name: 'cache_status',
-        description:
-          '查看 dsh-cache-cleaner 状态：缓存根/临时根/原临时根路径、TEMP/TMP 重定向是否生效、各根占用大小、自动清理配置与最近一次清理报告。只读，不删除任何文件。',
+        description: 'Show dsh-cache-cleaner status: cache root, temp root and legacy temp root; whether the TEMP/TMP redirect is active; size of each root; auto-clean settings and the last cleanup report. Read-only; deletes nothing.\n查看 dsh-cache-cleaner 状态：缓存根/临时根/原临时根路径、TEMP/TMP 重定向是否生效、各根占用大小、自动清理配置与最近一次清理报告。只读，不删除任何文件。',
         parameters: { type: 'object', properties: {}, additionalProperties: false },
         output: {
           schema: { type: 'string' },
@@ -1295,14 +1294,13 @@ export async function apply(ctx, config) {
     try {
       tools.register({
         name: 'cache_clean',
-        description:
-          '按白名单清理 DSH 临时缓存（dsh-workspace-changes 会话目录下的 tmp_obj_* 临时 git 对象），遵守天数闸门与配额闸门。默认 dry-run（apply:false）只列候选、不删文件；只有用户明确要求时才传 apply:true。legacy（旧 C 盘 %TEMP%）默认不清理，需显式 includeLegacy:true。',
+        description: 'Clean the DSH temp cache by allowlist (tmp_obj_* git objects under dsh-workspace-changes session dirs), subject to the age gate and the quota gate. Dry-run by default (apply:false) — lists candidates without deleting; pass apply:true only when the user explicitly asks. Legacy dirs under the old %TEMP% are left alone unless includeLegacy:true.\n按白名单清理 DSH 临时缓存（dsh-workspace-changes 会话目录下的 tmp_obj_* 临时 git 对象），遵守天数闸门与配额闸门。默认 dry-run（apply:false）只列候选、不删文件；只有用户明确要求时才传 apply:true。legacy（旧 C 盘 %TEMP%）默认不清理，需显式 includeLegacy:true。',
         parameters: {
           type: 'object',
           properties: {
-            apply: { type: 'boolean', description: 'true = 真实删除；默认 false = 只 dry-run 列候选。不可撤销，务必先 dry-run。' },
-            includeLegacy: { type: 'boolean', description: '是否同时清理旧位置 %TEMP% 下遗留的 dsh-workspace-changes-* 目录；默认 false。' },
-            mode: { type: 'string', enum: ['safe', 'normal', 'aggressive'], description: '清理档位；默认用插件配置的 mode（normal = 14 天 / 50GiB）。' },
+            apply: { type: 'boolean', description: 'true = actually delete; false (default) = dry-run, list candidates only. Irreversible — dry-run first.\ntrue = 真实删除；默认 false = 只 dry-run 列候选。不可撤销，务必先 dry-run。' },
+            includeLegacy: { type: 'boolean', description: 'Also clean leftover dsh-workspace-changes-* dirs under the old %TEMP%; default false.\n是否同时清理旧位置 %TEMP% 下遗留的 dsh-workspace-changes-* 目录；默认 false。' },
+            mode: { type: 'string', enum: ['safe', 'normal', 'aggressive'], description: 'Cleanup preset; defaults to the plugin\'s configured mode (normal = 14 days / 50 GiB).\n清理档位；默认用插件配置的 mode（normal = 14 天 / 50GiB）。' },
           },
           additionalProperties: false,
         },
@@ -1327,15 +1325,14 @@ export async function apply(ctx, config) {
     try {
       tools.register({
         name: 'cache_ownership',
-        description:
-          '查看当前 DSH 临时缓存（%TEMP% 或 <cacheRoot>\\temp 下的 dsh-workspace-changes-* 目录）的归属：每个目录的大小、tmp_obj/captures/objects 计数、活动时间窗，以及时间窗相交的候选会话。只读，不删除任何文件。注意：workspace-changes 目录没有持久化归属，候选会话是「时间窗推断」，不是精确归属。',
+        description: 'Attribute the current DSH temp cache (dsh-workspace-changes-* dirs under %TEMP% or <cacheRoot>\\temp): per-dir size, tmp_obj/captures/objects counts, active time window, and candidate sessions whose window overlaps. Read-only; deletes nothing. Note: these dirs carry no persisted ownership — candidates are inferred from a time window and labelled confidence: \"time-window\".\n查看当前 DSH 临时缓存（%TEMP% 或 <cacheRoot>\\temp 下的 dsh-workspace-changes-* 目录）的归属：每个目录的大小、tmp_obj/captures/objects 计数、活动时间窗，以及时间窗相交的候选会话。只读，不删除任何文件。注意：workspace-changes 目录没有持久化归属，候选会话是「时间窗推断」，不是精确归属。',
         parameters: {
           type: 'object',
           properties: {
-            root: { type: 'string', description: '只统计这个缓存根（默认用插件配置的 <cacheRoot>\\temp）。' },
-            includeLegacy: { type: 'boolean', description: '是否一并统计原临时根（旧 %TEMP%）下的遗留目录；默认 false。' },
-            sessionId: { type: 'string', description: '只显示某一个会话的归属。' },
-            json: { type: 'boolean', description: 'true = 返回原始 JSON；默认返回人类可读文本。' },
+            root: { type: 'string', description: 'Only inspect this cache root (defaults to the configured <cacheRoot>\\temp).\n只统计这个缓存根（默认用插件配置的 <cacheRoot>\\temp）。' },
+            includeLegacy: { type: 'boolean', description: 'Include leftover dirs under the legacy temp root (old %TEMP%); default false.\n是否一并统计原临时根（旧 %TEMP%）下的遗留目录；默认 false。' },
+            sessionId: { type: 'string', description: 'Show ownership for one session only.\n只显示某一个会话的归属。' },
+            json: { type: 'boolean', description: 'true = return raw JSON; default returns human-readable text.\ntrue = 返回原始 JSON；默认返回人类可读文本。' },
           },
           additionalProperties: false,
         },
@@ -1360,12 +1357,11 @@ export async function apply(ctx, config) {
     try {
       tools.register({
         name: 'conversation_list',
-        description:
-          '列出已归档（archive）的 DSH 会话：id、工作目录、创建时间、日志大小、投影缓存大小、子会话（subagent）id、ghost 标记、首条用户消息摘要。只读。includeAll:true 时同时给出全部会话计数。',
+        description: 'List archived DSH sessions: id, workspace, created time, log size, projection-cache size, subagent ids, ghost flag, and a snippet of the first user message. Read-only. includeAll:true also reports counts for all sessions.\n列出已归档（archive）的 DSH 会话：id、工作目录、创建时间、日志大小、投影缓存大小、子会话（subagent）id、ghost 标记、首条用户消息摘要。只读。includeAll:true 时同时给出全部会话计数。',
         parameters: {
           type: 'object',
           properties: {
-            includeAll: { type: 'boolean', description: 'true = 额外返回全部会话（含未归档）的计数与总大小；默认只列已归档。' },
+            includeAll: { type: 'boolean', description: 'true = also report count and total size for all sessions (archived included); default lists archived only.\ntrue = 额外返回全部会话（含未归档）的计数与总大小；默认只列已归档。' },
           },
           additionalProperties: false,
         },
@@ -1390,22 +1386,21 @@ export async function apply(ctx, config) {
     try {
       tools.register({
         name: 'conversation_delete',
-        description:
-          '删除已归档的 DSH 会话（默认只删会话日志；includeArtifacts:true 连同附件对象与投影缓存一起删；includeTempDirs:true 再连同时间窗推断的临时快照目录）。默认 dry-run（apply:false）只返回计划、零写入；apply:true 必须同时 confirm:true。只允许删除已归档且不活跃的会话；级联删除子会话（cascade，默认 true）。',
+        description: 'Delete archived DSH sessions (session logs only by default; includeArtifacts:true also removes attachment objects and the projection cache; includeTempDirs:true also removes temp snapshot dirs inferred by time window). Dry-run by default (apply:false) — plan only, no writes; apply:true requires confirm:true. Only archived, inactive sessions qualify; subagent sessions cascade by default (cascade:true).\n删除已归档的 DSH 会话（默认只删会话日志；includeArtifacts:true 连同附件对象与投影缓存一起删；includeTempDirs:true 再连同时间窗推断的临时快照目录）。默认 dry-run（apply:false）只返回计划、零写入；apply:true 必须同时 confirm:true。只允许删除已归档且不活跃的会话；级联删除子会话（cascade，默认 true）。',
         parameters: {
           type: 'object',
           properties: {
             sessionIds: {
               type: 'array',
               items: { type: 'string' },
-              description: '要删除的已归档会话 id 列表；与 allArchived 二选一。',
+              description: 'Ids of archived sessions to delete; use either this or allArchived.\n要删除的已归档会话 id 列表；与 allArchived 二选一。',
             },
-            allArchived: { type: 'boolean', description: '删除全部已归档会话；与 sessionIds 二选一。' },
-            includeArtifacts: { type: 'boolean', description: '是否连同附件对象（sha256 引用）与投影缓存一起删除；默认 false，只删会话日志。' },
-            includeTempDirs: { type: 'boolean', description: '是否连同时间窗推断出的 dsh-workspace-changes-* 临时目录一起删除；必须同时 includeArtifacts:true。' },
-            cascade: { type: 'boolean', description: '是否级联删除子会话（subagent）；默认 true。' },
-            apply: { type: 'boolean', description: 'true = 真实删除（需同时 confirm:true）；默认 false = 只返回计划。' },
-            confirm: { type: 'boolean', description: 'apply:true 时必须为 true 的二次确认。' },
+            allArchived: { type: 'boolean', description: 'Delete all archived sessions; use either this or sessionIds.\n删除全部已归档会话；与 sessionIds 二选一。' },
+            includeArtifacts: { type: 'boolean', description: 'Also delete attachment objects (sha256 references) and the projection cache; default false keeps session logs only.\n是否连同附件对象（sha256 引用）与投影缓存一起删除；默认 false，只删会话日志。' },
+            includeTempDirs: { type: 'boolean', description: 'Also delete dsh-workspace-changes-* temp dirs inferred by time window; requires includeArtifacts:true.\n是否连同时间窗推断出的 dsh-workspace-changes-* 临时目录一起删除；必须同时 includeArtifacts:true。' },
+            cascade: { type: 'boolean', description: 'Also delete subagent sessions; default true.\n是否级联删除子会话（subagent）；默认 true。' },
+            apply: { type: 'boolean', description: 'true = actually delete (confirm:true required); default false = return the plan only.\ntrue = 真实删除（需同时 confirm:true）；默认 false = 只返回计划。' },
+            confirm: { type: 'boolean', description: 'Must be true when apply:true — the second confirmation.\napply:true 时必须为 true 的二次确认。' },
           },
           additionalProperties: false,
         },
@@ -1430,12 +1425,11 @@ export async function apply(ctx, config) {
     try {
       tools.register({
         name: 'workspace_status',
-        description:
-          '只读盘点配置的工作区目录（例如 buddy\\_tmp、_临时输出、_archive）：每个根是否存在、性质（temp/archive）、大小/文件/目录数、保留天数、是否参与自动清理，以及按「子树最新 mtime」判定的过期候选（每个根最多列 50 条）。不建目录、不写报告、不改 mtime、不删除任何文件。',
+        description: 'Read-only inventory of configured workspace roots (e.g. _tmp, _archive): existence, kind (temp/archive), size/files/dirs, retain days, whether auto-clean includes it, and stale candidates judged by the subtree\'s newest mtime (up to 50 per root). Creates nothing, writes no report, never changes mtime, deletes nothing.\n只读盘点配置的工作区目录（例如 buddy\\_tmp、_临时输出、_archive）：每个根是否存在、性质（temp/archive）、大小/文件/目录数、保留天数、是否参与自动清理，以及按「子树最新 mtime」判定的过期候选（每个根最多列 50 条）。不建目录、不写报告、不改 mtime、不删除任何文件。',
         parameters: {
           type: 'object',
           properties: {
-            root: { type: 'string', description: '只盘点这个根（必须是配置里的根之一）；默认盘点全部配置根。' },
+            root: { type: 'string', description: 'Inspect only this root (must be one of the configured roots); default inspects all configured roots.\n只盘点这个根（必须是配置里的根之一）；默认盘点全部配置根。' },
           },
           additionalProperties: false,
         },
@@ -1467,15 +1461,14 @@ export async function apply(ctx, config) {
     try {
       tools.register({
         name: 'workspace_clean',
-        description:
-          '清理配置的工作区临时/归档目录：按「子树最新 mtime + 每个根自己的 retainDays」判定过期，只删配置根严格内部的直接子项（.git/.keep/KEEP/.dsh-cache-cleaner-keep 永远保留）。默认 dry-run（apply:false）只返回计划、零写入；apply:true 必须同时 confirm:true。archive 根默认拒绝（ARCHIVE_DISABLED），需插件配置 manageArchives:true 且本次调用 includeArchives:true 才会进入计划。',
+        description: 'Clean configured workspace temp/archive dirs: staleness is judged by the subtree\'s newest mtime plus each root\'s own retainDays, and only direct children strictly inside a configured root are removed (.git/.keep/KEEP/.dsh-cache-cleaner-keep are always kept). Dry-run by default (apply:false) — plan only, no writes; apply:true requires confirm:true. Archive roots are refused by default (ARCHIVE_DISABLED) and require both plugin config manageArchives:true and includeArchives:true on the call.\n清理配置的工作区临时/归档目录：按「子树最新 mtime + 每个根自己的 retainDays」判定过期，只删配置根严格内部的直接子项（.git/.keep/KEEP/.dsh-cache-cleaner-keep 永远保留）。默认 dry-run（apply:false）只返回计划、零写入；apply:true 必须同时 confirm:true。archive 根默认拒绝（ARCHIVE_DISABLED），需插件配置 manageArchives:true 且本次调用 includeArchives:true 才会进入计划。',
         parameters: {
           type: 'object',
           properties: {
-            apply: { type: 'boolean', description: 'true = 真实删除（需同时 confirm:true）；默认 false = 只返回计划。' },
-            confirm: { type: 'boolean', description: 'apply:true 时必须为 true 的二次确认。' },
-            includeArchives: { type: 'boolean', description: '是否把 kind=archive 的根纳入（还需插件配置 manageArchives:true）；默认 false。' },
-            root: { type: 'string', description: '只清理这个根（必须是配置里的根之一）；默认处理全部可清理的配置根。' },
+            apply: { type: 'boolean', description: 'true = actually delete (confirm:true required); default false = return the plan only.\ntrue = 真实删除（需同时 confirm:true）；默认 false = 只返回计划。' },
+            confirm: { type: 'boolean', description: 'Must be true when apply:true — the second confirmation.\napply:true 时必须为 true 的二次确认。' },
+            includeArchives: { type: 'boolean', description: 'Include kind=archive roots (plugin config manageArchives:true is also required); default false.\n是否把 kind=archive 的根纳入（还需插件配置 manageArchives:true）；默认 false。' },
+            root: { type: 'string', description: 'Clean only this root (must be one of the configured roots); default handles every cleanable configured root.\n只清理这个根（必须是配置里的根之一）；默认处理全部可清理的配置根。' },
           },
           additionalProperties: false,
         },
