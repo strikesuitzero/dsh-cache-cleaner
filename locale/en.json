@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH Cache Cleaner",
+    "description": "Moves the DSH temp cache to a configurable directory (TEMP/TMP redirect for the DSH process and its children), cleans workspace-snapshot temp git objects by age and quota with an allowlist, and manages archived sessions and workspace temp/archive folders. Dry-run by default."
+  }
+}

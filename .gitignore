@@ -1,0 +1,10 @@
+node_modules/
+_tmp/
+.cache/
+.vscode/
+.workbuddy/
+test-independent/
+*.log
+*.tgz
+.DS_Store
+DESIGN*.md

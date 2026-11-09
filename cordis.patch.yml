@@ -1,0 +1,20 @@
+# dsh-cache-cleaner bundle patch
+# 把插件作为一行插入 profile 的插件层；未知键会被插件忽略。
+# 默认配置是可移植的：cacheRoot 不写时用平台缓存目录，
+# 需要指定盘符或工作区目录时，在 profile 的 cordis.patch.yml 里按 id 覆盖 config。
+- insert:
+    - id: dsh-cache-cleaner
+      name: dsh-cache-cleaner
+      config:
+        redirectTemp: true
+        autoClean: true
+        autoCleanLegacy: false
+        startupDelaySeconds: 60
+        intervalHours: 6
+        idleQuietMinutes: 10
+        mode: normal
+        retainDays: null
+        quotaBytes: null
+        workspaceBases: []
+        workspaceRoots: []
+        manageArchives: false
