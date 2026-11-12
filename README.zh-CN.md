@@ -17,6 +17,20 @@
 - **设置页** — 设置下新增「缓存清理」区，含概览、缓存、工作区、归档会话、系统缓存与清理选项；面板先出界面，后台扫描完成后自动填入。
 - **9 个 agent 工具** — `cache_status`、`cache_clean`、`cache_ownership`、`conversation_list`、`conversation_delete`、`workspace_status`、`workspace_clean`、`system_cache_status`、`system_cache_clean`。
 
+## v0.5.1 更新内容
+
+- **系统缓存治理** — 新增固定清单，覆盖 DSH 临时根之外的可再生缓存：DSH 更新包
+  （`@deepseek-aidsh-desktop-updater`、旧版 `dsh-desktop-updater`）、`~/.dsh/plugin-updates`、
+  `~/.dsh/cache`、Electron 缓存（`Cache`、`Code Cache`、`GPUCache`、Dawn 系列）、
+  GPU 着色器缓存（`D3DSCache`、NVIDIA `DXCache`），以及 `%TEMP%` 下的 `dsh-*` 空目录。
+- **只手动触发 + 天数闸门** — 定时任务不碰系统缓存；候选需超过 7 天（空目录 24 小时）。
+  默认 dry-run，真正执行需要 `confirm`。
+- **更新包安全线** — 更新包默认只报告不删；只有 `allowUpdaterCleanup:true` **且**
+  pending 包版本不高于已安装 DSH 版本时才可删。
+- **新增两个 agent 工具** — `system_cache_status`、`system_cache_clean`（共 9 个）。
+- **CLI** — `--system-status`、`--system-clean [--apply --confirm] [--system-ids ...]`。
+- **设置页** — 新增「系统缓存」卡片：逐项大小、候选、预览与两段式确认。
+
 ## 安装
 
 ```sh

@@ -1,4 +1,4 @@
-// dsh-cache-cleaner — Web 客户端半（v0.6.0）
+// dsh-cache-cleaner — Web 客户端半（v0.5.1）
 // 设置 → DSH 缓存清理：状态、缓存/工作区/会话/系统缓存四类清理的预览与执行、清理选项保存。
 // 契约见 DESIGN-v4.md；皮肤只用 --dsw-alias-* token；不写 DOM、不 append body。
 window.__ModuleLoader__.load({

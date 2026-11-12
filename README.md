@@ -17,6 +17,22 @@ Move the DeepSeek Harness temp cache to a configurable location, clean it with a
 - **Settings panel** — a **缓存清理 / Cache cleaner** section under Settings with overview, cache, workspace, archived sessions, system caches and cleanup options; the panel renders immediately and fills data in as background scans finish.
 - **9 agent tools** — `cache_status`, `cache_clean`, `cache_ownership`, `conversation_list`, `conversation_delete`, `workspace_status`, `workspace_clean`, `system_cache_status`, `system_cache_clean`.
 
+## What's new in 0.5.1
+
+- **System cache governance** — a fixed catalog now covers regenerable caches outside the DSH temp root:
+  DSH updater packages (`@deepseek-aidsh-desktop-updater`, legacy `dsh-desktop-updater`),
+  `~/.dsh/plugin-updates`, `~/.dsh/cache`, Electron caches (`Cache`, `Code Cache`, `GPUCache`,
+  Dawn caches) and GPU shader caches (`D3DSCache`, NVIDIA `DXCache`), plus empty `dsh-*` dirs
+  under `%TEMP%`.
+- **Manual only, age-gated** — system caches are never touched by the scheduler; candidates must be
+  older than 7 days (empty dirs: 24 hours). Dry-run by default, `apply` requires `confirm`.
+- **Updater safety** — updater packages are reported but kept unless `allowUpdaterCleanup:true`
+  **and** the pending package version is not newer than the installed DSH version.
+- **Two new agent tools** — `system_cache_status`, `system_cache_clean` (9 tools total).
+- **CLI** — `--system-status`, `--system-clean [--apply --confirm] [--system-ids ...]`.
+- **Settings panel** — new "System caches" card with per-entry size, candidates, preview and a
+  two-step confirmation.
+
 ## Install
 
 ```sh

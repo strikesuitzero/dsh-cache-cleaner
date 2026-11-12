@@ -49,7 +49,7 @@ export const name = 'dsh-cache-cleaner';
 /** 只依赖宿主 tools 服务。缺少时插件不激活，所以不会在没登记工具的情况下改 TEMP。 */
 export const inject = ['tools'];
 
-const PLUGIN_VERSION = '0.6.0';
+const PLUGIN_VERSION = '0.5.1';
 
 /** 三个档位（与 cleaner 的 mode 取值一致）。 */
 const MODES = new Set(['safe', 'normal', 'aggressive']);
