@@ -339,9 +339,10 @@ async function toolChecks (fixtureConfig) {
     plugin = await import(`../index.js?smoke-v3=${Date.now()}`)
     await plugin.apply(ctx, config)
     const names = [...tools.keys()].sort()
-    checkEqual('T1 7 个工具注册', names, [
+    checkEqual('T1 9 个工具注册', names, [
       'cache_clean', 'cache_ownership', 'cache_status',
       'conversation_delete', 'conversation_list',
+      'system_cache_clean', 'system_cache_status',
       'workspace_clean', 'workspace_status',
     ])
     const cacheStatus = JSON.parse(await tools.get('cache_status').execute({}))

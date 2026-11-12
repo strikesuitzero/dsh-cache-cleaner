@@ -1,6 +1,6 @@
 {
   "name": "dsh-cache-cleaner",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "Moves the DeepSeek Harness temp cache to a configurable location and cleans it with an allowlist; also manages archived sessions and workspace temp/archive folders.",
   "exports": {

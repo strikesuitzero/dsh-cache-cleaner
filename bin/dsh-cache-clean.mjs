@@ -36,6 +36,11 @@ import {
   DEFAULT_WORKSPACE_BASES, DEFAULT_WORKSPACE_RETAIN_DAYS, DEFAULT_WORKSPACE_ROOTS,
   WORKSPACE_STATUS_SCHEMA,
 } from '../lib/workspace.mjs'
+import {
+  applySystemCleanup, normalizeSystemConfig, planSystemCleanup, scanSystemCaches,
+  SYSTEM_CACHE_IDS, SYSTEM_STATUS_SCHEMA,
+  DEFAULT_SYSTEM_RETAIN_DAYS, DEFAULT_EMPTY_DIR_MIN_AGE_HOURS,
+} from '../lib/system.mjs'
 import { GIB } from '../lib/util.mjs'
 
 const HELP = `dsh-cache-cleaner CLI
@@ -82,6 +87,17 @@ v3 工作区目录治理:
   （archive 闸门：默认 manageArchives=false；CLI 无插件配置，可用环境变量
     DSH_CACHE_CLEANER_MANAGE_ARCHIVES=1 显式打开，仅测试或明确授权时使用）
 
+v5 已知系统缓存（DSH 更新包 / 插件更新包 / Electron / GPU 着色器 / 空目录）:
+  --system-status       只读盘点已知系统缓存（catalog 固定，不删任何文件）
+  --system-clean        清理系统缓存里按天数过期的候选（默认 dry-run，零写入）
+  --apply               配合 --system-clean：真的删除
+  --confirm             配合 --apply：二次确认（缺它会被拒绝，退出码 2）
+  --system-ids <a,b>    只处理这些 catalog id（默认全部：${SYSTEM_CACHE_IDS.join(',')}）
+  --system-retain-days <n>  天数闸门（默认 ${DEFAULT_SYSTEM_RETAIN_DAYS}）
+  --system-empty-hours <n>  空目录最小年龄小时数（默认 ${DEFAULT_EMPTY_DIR_MIN_AGE_HOURS}）
+  （更新包默认只报告不删；CLI 无插件配置，可用环境变量
+    DSH_CACHE_CLEANER_ALLOW_UPDATER=1 显式允许，且仍需版本匹配）
+
   --help                显示本帮助
 `
 
@@ -101,7 +117,7 @@ for (let index = 0; index < argv.length; index += 1) {
     continue
   }
   const key = token.slice(2)
-  const takesValue = ['mode', 'root', 'temp-subdir', 'legacy', 'retain-days', 'quota-gb', 'batch', 'report-dir', 'delete-archived', 'dsh-home', 'workspace-root']
+  const takesValue = ['mode', 'root', 'temp-subdir', 'legacy', 'retain-days', 'quota-gb', 'batch', 'report-dir', 'delete-archived', 'dsh-home', 'workspace-root', 'system-ids', 'system-retain-days', 'system-empty-hours']
   if (takesValue.includes(key)) {
     const next = argv[index + 1]
     if (next === undefined || next.startsWith('--')) { console.error(`缺少参数值: --${key}`); process.exit(2) }
@@ -483,6 +499,122 @@ if (flags.includes('workspace-clean')) {
   const archiveRefused = (result.refusals ?? []).some((item) => item.reason === 'ARCHIVE_DISABLED')
   if (result.ok === false || (includeArchives && archiveRefused)) process.exit(2)
   process.exit(0)
+}
+
+// ---------------------------------------------------------------------------
+// v5：已知系统缓存（catalog 固定；更新包默认只报告不删）
+// ---------------------------------------------------------------------------
+
+function printSystemStatus (status, dshHome) {
+  console.log(`[SYSTEM] 保留 ${status.retainDays} 天 / 空目录 ≥ ${status.emptyDirMinAgeHours}h / DSH_HOME=${dshHome}`)
+  console.log(`DSH 已安装版本: ${status.installedVersion ?? '(未知)'}   更新包清理: ${status.allowUpdaterCleanup ? '允许（仍需版本匹配）' : '关闭（只报告）'}`)
+  console.log(`合计: ${formatBytes(status.totals.bytes)} / 候选 ${status.totals.candidateItems} 项 ${formatBytes(status.totals.candidateBytes)}`)
+  for (const entry of status.entries ?? []) {
+    if (!entry.exists) {
+      console.log(`  ${entry.id}  (不存在)`)
+      continue
+    }
+    const verdict = !entry.deletable
+      ? `不可删${entry.refuseReason ? `（${entry.refuseReason}）` : ''}`
+      : (entry.candidateItems ?? 0) > 0
+        ? `候选 ${entry.candidateItems} 项 / ${formatBytes(entry.candidateBytes)}`
+        : '无过期项'
+    console.log(`  ${entry.id}  ${formatBytes(entry.bytes)} / ${entry.files} 文件  ${verdict}`)
+    for (const row of (entry.candidates ?? []).slice(0, 20)) {
+      console.log(`    - ${row.path}  ${formatBytes(row.size ?? 0)}${row.dir ? '  [空目录]' : ''}`)
+    }
+  }
+  for (const item of status.protected ?? []) {
+    console.log(`  保护 ${item.id ?? item.path}  ${item.bytes != null ? formatBytes(item.bytes) : ''}  ${item.label ?? ''}`)
+  }
+  for (const error of status.errors ?? []) console.log(`  错误 ${error}`)
+}
+
+function printSystemPlan (plan, apply) {
+  console.log(`[SYSTEM ${apply ? 'APPLY' : 'DRY-RUN'}] 候选 ${plan.totals.entries} 组 / ${plan.totals.files} 项 / ${formatBytes(plan.totals.bytes)}`)
+  for (const item of plan.items ?? []) {
+    console.log(`  ${item.id}: ${item.files.length} 项 / ${formatBytes(item.bytes)}`)
+  }
+}
+
+if (flags.includes('system-status') || flags.includes('system-clean')) {
+  const now = Date.now()
+  const apply = flags.includes('apply')
+  const confirm = flags.includes('confirm')
+  const idsArg = values.get('system-ids')
+  const ids = idsArg ? idsArg.split(',').map((item) => item.trim()).filter(Boolean) : null
+  if (ids) {
+    const invalid = ids.filter((id) => !SYSTEM_CACHE_IDS.includes(id))
+    if (invalid.length > 0) {
+      console.error(`INVALID_ARGUMENT: 未知 catalog id: ${invalid.join(', ')}`)
+      process.exit(2)
+    }
+  }
+  const dshHome = values.has('dsh-home')
+    ? path.resolve(values.get('dsh-home'))
+    : path.resolve(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'))
+  const allowUpdaterCleanup = process.env.DSH_CACHE_CLEANER_ALLOW_UPDATER === '1'
+  if (apply && !confirm) {
+    console.error('CONFIRM_REQUIRED: --apply 必须同时给 --confirm（删除不可撤销，请先 dry-run 看计划）')
+    process.exit(2)
+  }
+  const systemConfig = normalizeSystemConfig({
+    systemCacheEnabled: true,
+    systemCacheIds: ids ?? [...SYSTEM_CACHE_IDS],
+    systemCacheRetainDays: values.has('system-retain-days')
+      ? Number(values.get('system-retain-days'))
+      : DEFAULT_SYSTEM_RETAIN_DAYS,
+    systemCacheEmptyDirHours: values.has('system-empty-hours')
+      ? Number(values.get('system-empty-hours'))
+      : DEFAULT_EMPTY_DIR_MIN_AGE_HOURS,
+    allowUpdaterCleanup,
+  })
+  // CLI 不是 DSH 进程：进程 exe 是 node，不能拿它当「已安装 DSH 版本」。
+  // 传 null 让更新包条目如实返回 INSTALLED_VERSION_UNKNOWN（只报告，不删）。
+  const status = await scanSystemCaches({ ...systemConfig, now, dshHome, cacheRoot, env: process.env, installedVersion: null })
+  if (flags.includes('system-status')) {
+    if (flags.includes('json')) console.log(JSON.stringify(status, null, 2))
+    else printSystemStatus(status, dshHome)
+    process.exit(0)
+  }
+  const plan = planSystemCleanup(status, { ids: systemConfig.ids })
+  const result = await applySystemCleanup(plan, { apply, confirm, dshHome, cacheRoot, env: process.env })
+  const reportDir = values.has('report-dir') ? path.resolve(values.get('report-dir')) : path.join(cacheRoot, 'reports')
+  let reportPath = null
+  if (!flags.includes('no-report')) {
+    try {
+      fs.mkdirSync(reportDir, { recursive: true })
+      reportPath = path.join(reportDir, `system-${now}-${apply ? 'apply' : 'dryrun'}.json`)
+      fs.writeFileSync(reportPath, JSON.stringify({
+        schema: SYSTEM_STATUS_SCHEMA,
+        generatedAt: new Date(now).toISOString(),
+        apply,
+        status,
+        plan,
+        result,
+      }, null, 2))
+    } catch (error) {
+      console.error(`警告: 报告写入失败: ${error?.message || error}`)
+      reportPath = null
+    }
+  }
+  if (flags.includes('json')) {
+    console.log(JSON.stringify({ apply, status, plan, result, reportPath }, null, 2))
+  } else {
+    printSystemStatus(status, dshHome)
+    console.log('')
+    printSystemPlan(plan, apply)
+    if (result.applied) {
+      console.log(`已删除 ${result.deleted.files} 个文件 / ${formatBytes(result.deleted.bytes)}，空目录 ${result.deleted.dirs} 个，跳过 ${result.skipped.length}`)
+      const byCode = new Map()
+      for (const item of result.skipped) byCode.set(item.code, (byCode.get(item.code) ?? 0) + 1)
+      for (const [code, count] of byCode) console.log(`  跳过 ${code}: ${count}`)
+    } else {
+      console.log('（dry-run：没有删除任何文件；加 --apply --confirm 才真删）')
+    }
+    if (reportPath) console.log(`报告: ${reportPath}`)
+  }
+  process.exit(result.applied === false && apply ? 2 : 0)
 }
 
 /**

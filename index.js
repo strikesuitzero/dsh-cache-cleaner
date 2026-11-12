@@ -32,6 +32,13 @@ import {
   WORKSPACE_STATUS_SCHEMA,
 } from './lib/workspace.mjs';
 import {
+  applySystemCleanup,
+  normalizeSystemConfig,
+  planSystemCleanup,
+  scanSystemCaches,
+  SYSTEM_CACHE_IDS,
+} from './lib/system.mjs';
+import {
   ApiError,
   createClientApi,
   createOptionsSaver,
@@ -42,7 +49,7 @@ export const name = 'dsh-cache-cleaner';
 /** 只依赖宿主 tools 服务。缺少时插件不激活，所以不会在没登记工具的情况下改 TEMP。 */
 export const inject = ['tools'];
 
-const PLUGIN_VERSION = '0.5.0';
+const PLUGIN_VERSION = '0.6.0';
 
 /** 三个档位（与 cleaner 的 mode 取值一致）。 */
 const MODES = new Set(['safe', 'normal', 'aggressive']);
@@ -71,6 +78,13 @@ const PLUGIN_DEFAULTS = {
   workspaceBases: [],
   workspaceRoots: [],
   manageArchives: false,
+  // v5：系统缓存（Electron/GPU/更新包/插件更新包/%TEMP% 空目录）。
+  // 只手动触发：自动定时器不碰这些目录（避免正在运行的 Electron 缓存被删）。
+  systemCacheEnabled: true,
+  systemCacheIds: [...SYSTEM_CACHE_IDS],
+  systemCacheRetainDays: 7,
+  systemCacheEmptyDirHours: 24,
+  allowUpdaterCleanup: false,
 };
 
 const USER_KEYS = ['cacheRoot', ...Object.keys(PLUGIN_DEFAULTS)];
@@ -170,6 +184,13 @@ function normalizeConfig(raw) {
     : [];
   cfg.workspaceRoots = Array.isArray(cfg.workspaceRoots) ? cfg.workspaceRoots.filter(Boolean) : [];
   cfg.manageArchives = cfg.manageArchives === true;
+  // v5：系统缓存开关/清单/天数；列表只保留已知 id（未知 id 直接丢弃，避免误扫）。
+  const system = normalizeSystemConfig(cfg);
+  cfg.systemCacheEnabled = system.enabled;
+  cfg.systemCacheIds = system.ids;
+  cfg.systemCacheRetainDays = system.retainDays;
+  cfg.systemCacheEmptyDirHours = system.emptyDirMinAgeHours;
+  cfg.allowUpdaterCleanup = system.allowUpdaterCleanup;
   return cfg;
 }
 
@@ -313,6 +334,10 @@ const WORKSPACE_STATUS_KEYS = ['root'];
 
 /** workspace_clean 允许的参数（DESIGN-v3 §5）。 */
 const WORKSPACE_CLEAN_KEYS = ['apply', 'confirm', 'includeArchives', 'root'];
+
+// v5：系统缓存工具参数。ids 只接受 catalog 里已知的 id（未知 id 报 UNKNOWN_PARAMETER）。
+const SYSTEM_STATUS_KEYS = [];
+const SYSTEM_CLEAN_KEYS = ['apply', 'confirm', 'ids'];
 
 /** 状态输出里每个根的 stale 明细上限（DESIGN-v3 §5：≤50）。 */
 const WORKSPACE_STATUS_ENTRY_LIMIT = 50;
@@ -625,6 +650,9 @@ export async function apply(ctx, config) {
   // v3：工作区目录治理（DESIGN-v3）。围栏/根清单来自 config，扫描与删除全在 lib/workspace.mjs。
   const workspaceReportPath = (kind) =>
     path.join(cfg.cacheRoot, 'reports', `workspace-${reportStamp()}-${kind}.json`);
+  // v5：系统缓存报告（与 workspace 一样落在 <cacheRoot>/reports，便于事后核对）。
+  const systemReportPath = (kind) =>
+    path.join(cfg.cacheRoot, 'reports', `system-${reportStamp()}-${kind}.json`);
   const workspaceNormalized = (now = Date.now()) =>
     normalizeWorkspaceRoots(
       {
@@ -1000,6 +1028,109 @@ export async function apply(ctx, config) {
     }
   }
 
+  // --- v5：系统缓存（只手动触发；默认 dry-run） ----------------------------
+  function systemScanOptions() {
+    return {
+      dshHome,
+      cacheRoot: cfg.cacheRoot,
+      systemCacheEnabled: cfg.systemCacheEnabled,
+      systemCacheIds: cfg.systemCacheIds,
+      systemCacheRetainDays: cfg.systemCacheRetainDays,
+      systemCacheEmptyDirHours: cfg.systemCacheEmptyDirHours,
+      allowUpdaterCleanup: cfg.allowUpdaterCleanup,
+    };
+  }
+
+  function writeSystemReport(kind, payload) {
+    try {
+      fs.mkdirSync(path.join(cfg.cacheRoot, 'reports'), { recursive: true });
+      const reportPath = systemReportPath(kind);
+      fs.writeFileSync(reportPath, `${JSON.stringify(payload, null, 2)}\n`);
+      return reportPath;
+    } catch {
+      return null;
+    }
+  }
+
+  async function runSystemStatus(input) {
+    const unknown = Object.keys(input ?? {}).filter((key) => !SYSTEM_STATUS_KEYS.includes(key));
+    if (unknown.length > 0) {
+      return { ok: false, error: { code: 'UNKNOWN_PARAMETER', details: { unknown } } };
+    }
+    try {
+      return { ok: true, data: await scanSystemCaches(systemScanOptions()) };
+    } catch (error) {
+      return { ok: false, error: { code: 'SYSTEM_STATUS_FAILED', message: error?.message || String(error) } };
+    }
+  }
+
+  async function runSystemClean(input) {
+    const unknown = Object.keys(input ?? {}).filter((key) => !SYSTEM_CLEAN_KEYS.includes(key));
+    if (unknown.length > 0) {
+      return { ok: false, error: { code: 'UNKNOWN_PARAMETER', details: { unknown } } };
+    }
+    const apply = input.apply === true;
+    if (apply && input.confirm !== true) {
+      return {
+        ok: false,
+        error: {
+          code: 'CONFIRM_REQUIRED',
+          message: 'apply:true 必须同时 confirm:true（系统缓存删除不可撤销，请先 dry-run 看计划）',
+        },
+      };
+    }
+    let ids = null;
+    if (input.ids !== undefined) {
+      if (!Array.isArray(input.ids) || input.ids.length === 0) {
+        return { ok: false, error: { code: 'INVALID_ARGUMENT', message: 'ids 必须是非空数组' } };
+      }
+      const invalid = input.ids.filter((id) => typeof id !== 'string' || !SYSTEM_CACHE_IDS.includes(id));
+      if (invalid.length > 0) {
+        return { ok: false, error: { code: 'UNKNOWN_PARAMETER', details: { invalid } } };
+      }
+      ids = [...new Set(input.ids)];
+    }
+    try {
+      const status = await scanSystemCaches(systemScanOptions());
+      let plan = planSystemCleanup(status, { ids });
+      plan = { ...plan, write: false };
+      const applyResult = await serialized(() =>
+        applySystemCleanup(plan, {
+          apply,
+          confirm: true,
+          dshHome,
+          cacheRoot: cfg.cacheRoot,
+          env: process.env,
+        }),
+      );
+      const reportPath = writeSystemReport(apply ? 'apply' : 'dryrun', {
+        ...applyResult,
+        plan,
+        dryRun: !apply,
+        generatedAt: new Date().toISOString(),
+      });
+      if (apply) invalidateSections();
+      log.info(
+        `[cache-cleaner] system_clean（apply=${apply}）：候选 ${plan.totals?.files ?? 0} 文件 / ` +
+          `${formatBytes(plan.totals?.bytes ?? 0)}，删除 ${applyResult.deleted.files} 文件 / ` +
+          `${formatBytes(applyResult.deleted.bytes)}，跳过 ${applyResult.skipped.length}，报告 ${reportPath ?? '(未写)'}`,
+      );
+      return {
+        ok: true,
+        data: {
+          applied: applyResult.applied,
+          deleted: applyResult.deleted,
+          skipped: applyResult.skipped,
+          plan,
+          reportPath,
+          status: apply ? undefined : status,
+        },
+      };
+    } catch (error) {
+      return { ok: false, error: { code: 'SYSTEM_CLEAN_FAILED', message: error?.message || String(error) } };
+    }
+  }
+
   // --- 5.1 设置页（Client 半）用的 HTTP API（DESIGN-v4 §2） -----------------
   function currentOptions() {
     return {
@@ -1009,6 +1140,8 @@ export async function apply(ctx, config) {
       autoClean: cfg.autoClean,
       autoCleanLegacy: cfg.autoCleanLegacy,
       manageArchives: cfg.manageArchives,
+      systemCacheEnabled: cfg.systemCacheEnabled,
+      allowUpdaterCleanup: cfg.allowUpdaterCleanup,
       startupDelaySeconds: cfg.startupDelaySeconds,
       intervalHours: cfg.intervalHours,
       idleQuietMinutes: cfg.idleQuietMinutes,
@@ -1041,7 +1174,7 @@ export async function apply(ctx, config) {
   async function buildStatusForApi(params = {}) {
     const started = Date.now();
     const requested = Array.isArray(params.sections) ? params.sections : null;
-    const wanted = new Set(requested ?? ['meta', 'sizes', 'workspace', 'conversations']);
+    const wanted = new Set(requested ?? ['meta', 'sizes', 'workspace', 'conversations', 'system']);
     const timings = { meta: 0 };
     const status = buildStatusMeta();
     status.complete = false;
@@ -1086,10 +1219,31 @@ export async function apply(ctx, config) {
         timings.conversations = Date.now() - at;
       }
     }
+    if (wanted.has('system')) {
+      const at = Date.now();
+      try {
+        const scanned = await cachedSection('system', () => scanSystemCaches(systemScanOptions()));
+        const value = scanned.value;
+        data.system = {
+          enabled: value.enabled,
+          entries: value.entries,
+          protected: value.protected,
+          totals: value.totals,
+          installedVersion: value.installedVersion,
+          retainDays: value.retainDays,
+          allowUpdaterCleanup: value.allowUpdaterCleanup,
+          errors: value.errors,
+        };
+        timings.system = Date.now() - at;
+        timings.systemCached = scanned.cached;
+      } catch (error) {
+        data.system = { error: { code: 'SYSTEM_STATUS_FAILED', message: error?.message || String(error) } };
+        timings.system = Date.now() - at;
+      }
+    }
     timings.total = Date.now() - started;
     return data;
   }
-
   const api = createClientApi({
     actions: {
       status: buildStatusForApi,
@@ -1114,6 +1268,17 @@ export async function apply(ctx, config) {
       },
       conversationDelete: async (params) => {
         const result = await runConversationDelete(params);
+        if (!result.ok) throw apiErrorOf(result.error);
+        if (params && params.apply === true) invalidateSections();
+        return result.data;
+      },
+      systemStatus: async (params) => {
+        const result = await runSystemStatus(params ?? {});
+        if (!result.ok) throw apiErrorOf(result.error);
+        return result.data;
+      },
+      systemClean: async (params) => {
+        const result = await runSystemClean(params ?? {});
         if (!result.ok) throw apiErrorOf(result.error);
         if (params && params.apply === true) invalidateSections();
         return result.data;
@@ -1494,6 +1659,61 @@ export async function apply(ctx, config) {
       });
     } catch (error) {
       log.warn(`[cache-cleaner] 注册 workspace_clean 失败：${error?.message || error}`);
+    }
+
+    // --- v5：system_cache_status（只读） ------------------------------------
+    try {
+      tools.register({
+        name: 'system_cache_status',
+        description: 'Read-only inventory of known *regenerable* system caches: DSH updater packages, legacy updater dir, plugin update packages, ~/.dsh/cache, Electron caches, GPU shader caches, and empty dsh-* dirs under %TEMP%. Reports size, age-gated candidates, whether each entry is deletable, and the protected runtime/user-data dirs it will never touch. Deletes nothing.\\n只读盘点已知的「可再生系统缓存」：DSH 更新包、旧版更新器目录、插件更新包、~/.dsh/cache、Electron 缓存、GPU 着色器缓存、%TEMP% 下的 dsh-* 空目录。报告每项大小、按天数判定的候选、是否可删，以及永不触碰的运行时/用户数据目录。不删除任何文件。',
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+        output: {
+          schema: { type: 'string' },
+          render: (_args, value) => [{ type: 'text', text: value }],
+        },
+        async execute() {
+          const result = await runSystemStatus({});
+          if (result.ok) return prettyJson(result.data);
+          return compactJson({ error: result.error.code, message: result.error.message });
+        },
+      });
+    } catch (error) {
+      log.warn(`[cache-cleaner] 注册 system_cache_status 失败：${error?.message || error}`);
+    }
+
+    // --- v5：system_cache_clean（默认 dry-run；apply 必须 confirm） ---------
+    try {
+      tools.register({
+        name: 'system_cache_clean',
+        description: 'Clean age-gated candidates from the known system caches (see system_cache_status). Dry-run by default (apply:false); apply:true requires confirm:true. Updater packages are only deleted when allowUpdaterCleanup:true in plugin config AND the pending package version <= the installed DSH version; otherwise they are reported and kept. Locked files are skipped, never forced.\\n清理已知系统缓存中按天数过期的候选（见 system_cache_status）。默认 dry-run（apply:false）；apply:true 必须同时 confirm:true。更新包只有在插件配置 allowUpdaterCleanup:true 且 pending 包版本 <= 已安装 DSH 版本时才会删；否则只报告、保留。被占用的文件跳过，不强制删除。',
+        parameters: {
+          type: 'object',
+          properties: {
+            apply: { type: 'boolean', description: 'true = actually delete (confirm:true required); default false = return the plan only.\\ntrue = 真实删除（需同时 confirm:true）；默认 false = 只返回计划。' },
+            confirm: { type: 'boolean', description: 'Must be true when apply:true — the second confirmation.\\napply:true 时必须为 true 的二次确认。' },
+            ids: {
+              type: 'array',
+              items: { type: 'string', enum: SYSTEM_CACHE_IDS },
+              description: 'Only clean these catalog ids; default cleans every deletable entry.\\n只清理这些 catalog id；默认处理全部可删项。',
+            },
+          },
+          additionalProperties: false,
+        },
+        output: {
+          schema: { type: 'string' },
+          render: (_args, value) => [{ type: 'text', text: value }],
+        },
+        async execute(args) {
+          const result = await runSystemClean(args && typeof args === 'object' ? args : {});
+          if (result.ok) return prettyJson(result.data);
+          if (result.error.code === 'UNKNOWN_PARAMETER') {
+            return compactJson({ error: 'UNKNOWN_PARAMETER', details: result.error.details ?? {} });
+          }
+          return compactJson({ error: result.error.code, message: result.error.message });
+        },
+      });
+    } catch (error) {
+      log.warn(`[cache-cleaner] 注册 system_cache_clean 失败：${error?.message || error}`);
     }
   } else {
     log.warn('[cache-cleaner] tools 服务不可用，未注册 cache_*/conversation_*/workspace_* 工具');

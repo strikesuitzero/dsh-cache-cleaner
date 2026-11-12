@@ -1,5 +1,5 @@
-// dsh-cache-cleaner — Web 客户端半（v0.4.10）
-// 设置 → 缓存守卫：状态、四类清理的预览/执行、清理选项保存。
+// dsh-cache-cleaner — Web 客户端半（v0.6.0）
+// 设置 → DSH 缓存清理：状态、缓存/工作区/会话/系统缓存四类清理的预览与执行、清理选项保存。
 // 契约见 DESIGN-v4.md；皮肤只用 --dsw-alias-* token；不写 DOM、不 append body。
 window.__ModuleLoader__.load({
   id: 'dsh-cache-cleaner',
@@ -103,6 +103,24 @@ window.__ModuleLoader__.load({
       previewConv: '预览删除',
       runConv: '删除已归档',
       confirmConv: '确认删除？',
+      sysSection: '系统缓存',
+      sysHint: '只清理可再生的已知系统缓存（固定清单，不接受外部路径）。更新包默认只报告不删；运行时/会话数据永不触碰；被占用的文件跳过。',
+      sysTotals: '合计 {bytes} · 候选 {count} 项 / {candBytes}',
+      sysDisabled: '系统缓存治理已关闭（可在清理选项中打开）。',
+      sysColName: '缓存',
+      sysColPath: '路径',
+      sysColSize: '大小',
+      sysColCand: '候选',
+      sysColState: '状态',
+      sysCand: '{count} 项 / {bytes}',
+      sysNoCand: '无过期候选',
+      sysNotDeletable: '不可删（{reason}）',
+      sysMissing: '不存在',
+      sysPreview: '预览系统缓存',
+      sysRun: '清理系统缓存',
+      sysConfirm: '确认清理系统缓存？',
+      sysAllowUpdater: '允许删除 DSH 更新包（仍需版本匹配）',
+      sysEnabled: '启用系统缓存治理',
       optionsSection: '清理选项',
       optionsHint: '保存会写入 profile 的 cordis.patch.yml，并让插件重新加载；工具与定时任务读同一份配置。',
       autoClean: '定时自动清理',
@@ -201,6 +219,24 @@ window.__ModuleLoader__.load({
       previewConv: 'Preview deletion',
       runConv: 'Delete archived',
       confirmConv: 'Confirm deletion?',
+      sysSection: 'System caches',
+      sysHint: 'Cleans only known regenerable system caches (fixed catalog, no external paths). Updater packages are reported but not deleted by default; runtime/session data is never touched; locked files are skipped.',
+      sysTotals: '{bytes} total · {count} candidate(s) / {candBytes}',
+      sysDisabled: 'System cache cleanup is disabled (enable it in Cleanup options).',
+      sysColName: 'Cache',
+      sysColPath: 'Paths',
+      sysColSize: 'Size',
+      sysColCand: 'Candidates',
+      sysColState: 'State',
+      sysCand: '{count} item(s) / {bytes}',
+      sysNoCand: 'nothing stale',
+      sysNotDeletable: 'not deletable ({reason})',
+      sysMissing: 'missing',
+      sysPreview: 'Preview system caches',
+      sysRun: 'Clean system caches',
+      sysConfirm: 'Confirm system cache cleanup?',
+      sysAllowUpdater: 'Allow deleting DSH updater packages (still version-gated)',
+      sysEnabled: 'Enable system cache cleanup',
       optionsSection: 'Cleanup options',
       optionsHint: 'Saving writes the profile cordis.patch.yml and reloads the plugin; tools and timers read the same config.',
       autoClean: 'Scheduled auto cleanup',
@@ -265,6 +301,8 @@ window.__ModuleLoader__.load({
         manageArchives: o.manageArchives === true,
         intervalDays: intervalDaysFromHours(o.intervalHours),
         intervalHoursCurrent: Number.isFinite(Number(o.intervalHours)) ? Number(o.intervalHours) : null,
+        systemCacheEnabled: o.systemCacheEnabled !== false,
+        allowUpdaterCleanup: o.allowUpdaterCleanup === true,
       };
     }
 
@@ -327,6 +365,15 @@ window.__ModuleLoader__.load({
           'projcache=' + (deleted.projcacheFiles || 0) + ' attachments=' + (deleted.attachments || 0) + ' tempDirs=' + (deleted.tempDirs || 0),
         ];
       }
+      if (action === 'system-clean') {
+        const plan = data.plan || {};
+        const deleted = data.deleted || {};
+        return [
+          'plan entries=' + ((plan.totals && plan.totals.entries) || 0) + ' files=' + ((plan.totals && plan.totals.files) || 0) + ' bytes=' + formatBytes((plan.totals && plan.totals.bytes) || 0),
+          'deleted files=' + (deleted.files || 0) + ' bytes=' + formatBytes(deleted.bytes || 0) + ' dirs=' + (deleted.dirs || 0),
+          'skipped=' + ((data.skipped || []).length),
+        ];
+      }
       if (action === 'options-save') {
         return [t('saved')];
       }
@@ -350,7 +397,7 @@ window.__ModuleLoader__.load({
       const t = props.t;
 
       const [view, setView] = React.useState({ loading: true, error: null, data: null });
-      const [sections, setSections] = React.useState({ sizes: 'idle', workspace: 'idle', conversations: 'idle' });
+      const [sections, setSections] = React.useState({ sizes: 'idle', workspace: 'idle', conversations: 'idle', system: 'idle' });
       const [form, setForm] = React.useState(null);
       const [flags, setFlags] = React.useState({ includeLegacy: false, includeArchives: false, artifacts: false, tempDirs: false });
       const [busy, setBusy] = React.useState(null);
@@ -399,6 +446,8 @@ window.__ModuleLoader__.load({
             next.workspace = payload.workspace || {};
           } else if (name === 'conversations') {
             next.conversations = payload.conversations || {};
+          } else if (name === 'system') {
+            next.system = payload.system || {};
           }
           return { loading: false, error: null, data: next };
         });
@@ -444,6 +493,7 @@ window.__ModuleLoader__.load({
             loadSection('sizes');
             loadSection('workspace');
             loadSection('conversations');
+            loadSection('system');
           } catch (error) {
             if (alive.current) setView({ loading: false, error: (error && error.message) || String(error), data: null });
           }
@@ -530,6 +580,8 @@ window.__ModuleLoader__.load({
           autoClean: form.autoClean === true,
           autoCleanLegacy: form.autoCleanLegacy === true,
           manageArchives: form.manageArchives === true,
+          systemCacheEnabled: form.systemCacheEnabled === true,
+          allowUpdaterCleanup: form.allowUpdaterCleanup === true,
         };
         if (form.intervalDays !== '') patch.intervalHours = Number(form.intervalDays) * 24;
         setBusy('options-save');
@@ -825,6 +877,8 @@ window.__ModuleLoader__.load({
       const options = data.options || {};
       const workspace = data.workspace || {};
       const conversations = data.conversations || {};
+      const system = data.system || null;
+      const systemEntries = system && Array.isArray(system.entries) ? system.entries : [];
       const conv = archivedTotals(conversations);
       const archivedRows = Array.isArray(conversations.archived) ? conversations.archived : [];
       const previewData = outcome && outcome.action === 'conversation-delete' && outcome.json && outcome.json.ok === true ? outcome.json.data || {} : null;
@@ -1308,6 +1362,82 @@ window.__ModuleLoader__.load({
             : null,
         ),
 
+        // 4.5 system caches
+        h(
+          'div',
+          { style: S.card, className: 'dcg-card dcg-system' },
+          h('div', { style: S.cardTitle }, t('sysSection')),
+          h('div', { style: S.hint }, t('sysHint')),
+          !system
+            ? h('div', { style: S.hint }, hintFor('system'))
+            : system.error
+              ? h('div', { style: S.error }, t('error') + '：' + errorText({ ok: false, error: system.error }, t))
+              : system.enabled === false
+                ? h('div', { style: S.hint }, t('sysDisabled'))
+                : h(
+                    React.Fragment,
+                    null,
+                    h(
+                      'div',
+                      { style: S.hint },
+                      interpolate(t('sysTotals'), {
+                        bytes: formatBytes((system.totals && system.totals.bytes) || 0),
+                        count: (system.totals && system.totals.candidateItems) || 0,
+                        candBytes: formatBytes((system.totals && system.totals.candidateBytes) || 0),
+                      }),
+                    ),
+                    h(
+                      'table',
+                      { style: S.table },
+                      h(
+                        'thead',
+                        null,
+                        h(
+                          'tr',
+                          null,
+                          h('th', { style: S.th }, t('sysColName')),
+                          h('th', { style: S.th }, t('sysColPath')),
+                          h('th', { style: S.th }, t('sysColSize')),
+                          h('th', { style: S.th }, t('sysColCand')),
+                          h('th', { style: S.th }, t('sysColState')),
+                        ),
+                      ),
+                      h(
+                        'tbody',
+                        null,
+                        systemEntries.map(function (entry) {
+                          let state;
+                          if (!entry.exists) state = t('sysMissing');
+                          else if (entry.deletable !== true) state = interpolate(t('sysNotDeletable'), { reason: entry.refuseReason || '—' });
+                          else state = (entry.candidateItems || 0) > 0 ? t('activeNow') : t('sysNoCand');
+                          const paths = (entry.paths || []).map(function (row) { return row.path; }).join('  ·  ') || '—';
+                          return h(
+                            'tr',
+                            { key: entry.id },
+                            h('td', { style: S.td }, h('span', { style: S.code }, entry.id)),
+                            h('td', { style: S.td }, h('span', { style: S.code, title: paths }, paths)),
+                            h('td', { style: S.td }, formatBytes(entry.bytes || 0)),
+                            h(
+                              'td',
+                              { style: S.td },
+                              (entry.candidateItems || 0) > 0
+                                ? interpolate(t('sysCand'), { count: entry.candidateItems, bytes: formatBytes(entry.candidateBytes || 0) })
+                                : t('sysNoCand'),
+                            ),
+                            h('td', { style: S.td }, state),
+                          );
+                        }),
+                      ),
+                    ),
+                    h(
+                      'div',
+                      { style: S.btnRow },
+                      btn(S.btn, t('sysPreview'), function () { clearPending(); run('system-clean', { apply: false }); }, busy !== null),
+                      dangerButton('system-clean', t('sysRun'), t('sysConfirm'), function () { ask('system-clean', 'system-clean', {}); }),
+                    ),
+                  ),
+        ),
+
         // 5. options
         h(
           'div',
@@ -1331,6 +1461,18 @@ window.__ModuleLoader__.load({
             { style: S.row },
             h('div', { style: S.label }, t('manageArchives')),
             h('div', { style: S.control }, checkbox('dcg-managearchives', form && form.manageArchives, function (v) { setField('manageArchives', v); }, t('manageArchives'))),
+          ),
+          h(
+            'div',
+            { style: S.row },
+            h('div', { style: S.label }, t('sysEnabled')),
+            h('div', { style: S.control }, checkbox('dcg-systemenabled', form && form.systemCacheEnabled, function (v) { setField('systemCacheEnabled', v); }, t('sysEnabled'))),
+          ),
+          h(
+            'div',
+            { style: S.row },
+            h('div', { style: S.label }, t('sysAllowUpdater')),
+            h('div', { style: S.control }, checkbox('dcg-allowupdater', form && form.allowUpdaterCleanup, function (v) { setField('allowUpdaterCleanup', v); }, t('sysAllowUpdater'))),
           ),
           h(
             'div',

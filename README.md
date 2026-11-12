@@ -13,8 +13,9 @@ Move the DeepSeek Harness temp cache to a configurable location, clean it with a
 - **Two gates** — age (default 14 days) and quota (when the cache exceeds 50 GiB, evict oldest-first down to 80%). Legacy `%TEMP%/dsh-workspace-changes-*` directories are handled separately with a 24-hour minimum age.
 - **Archived sessions** — list archived sessions, preview a deletion plan, then delete a session together with (or without) its artifacts: attachments and the session projection cache. Deletion goes through the host's own registry APIs; a live session is always refused.
 - **Workspace roots** — report and (optionally) clean direct children of configured temp/archive folders using each subtree's newest mtime. Archives are report-only until explicitly enabled.
-- **Settings panel** — a **缓存清理 / Cache cleaner** section under Settings with overview, cache, workspace, archived sessions and cleanup options; the panel renders immediately and fills data in as background scans finish.
-- **7 agent tools** — `cache_status`, `cache_clean`, `cache_ownership`, `conversation_list`, `conversation_delete`, `workspace_status`, `workspace_clean`.
+- **System caches** — a fixed catalog of regenerable caches outside the DSH temp root: DSH updater packages, the legacy updater directory, `~/.dsh/plugin-updates`, `~/.dsh/cache`, Electron caches (`Cache`, `Code Cache`, `GPUCache`, Dawn caches), GPU shader caches (`D3DSCache`, NVIDIA `DXCache`) and empty `dsh-*` directories under `%TEMP%`. Manual only; age-gated (default 7 days); updater packages are kept unless `allowUpdaterCleanup:true` **and** the pending package version is not newer than the installed one.
+- **Settings panel** — a **缓存清理 / Cache cleaner** section under Settings with overview, cache, workspace, archived sessions, system caches and cleanup options; the panel renders immediately and fills data in as background scans finish.
+- **9 agent tools** — `cache_status`, `cache_clean`, `cache_ownership`, `conversation_list`, `conversation_delete`, `workspace_status`, `workspace_clean`, `system_cache_status`, `system_cache_clean`.
 
 ## Install
 
@@ -47,6 +48,11 @@ All keys are optional. Set them by editing the plugin entry's `config` in your p
 | `workspaceBases` | `[]` | Directories that configured workspace roots must live strictly inside. |
 | `workspaceRoots` | `[]` | `[{path, kind: temp\|archive, retainDays, auto}]`; only direct children are considered. |
 | `manageArchives` | `false` | Master switch for deleting `kind: archive` roots. |
+| `systemCacheEnabled` | `true` | Include the system-cache section in status and the settings panel. |
+| `systemCacheIds` | all 7 catalog ids | Subset of system cache entries to report/handle. |
+| `systemCacheRetainDays` | `7` | Age gate for plugin updates, Electron and GPU caches. |
+| `systemCacheEmptyDirHours` | `24` | Minimum age before an empty `dsh-*` dir under `%TEMP%` is removed. |
+| `allowUpdaterCleanup` | `false` | Allow deleting updater packages whose version is not newer than the installed DSH version. |
 
 Example override in the profile:
 
@@ -68,6 +74,7 @@ Example override in the profile:
 - **Path fences** — workspace roots must be strictly inside a configured base; volume roots, the home directory, `DSH_HOME` and the cache root are rejected.
 - **Real-space check** — the cleaner compares free space before/after and reports any gap (for example a safe-delete implementation that redirects files to the recycle bin).
 - **Failures are isolated** — one undeletable file is reported as `skipped` with its path and errno; the rest of the batch continues.
+- **System caches are a closed catalog** — system cleanup accepts no external paths; only the fixed entries listed above are scanned, and only paths strictly inside a catalog root are deleted. Runtime and user-data directories (`sessions`, `attachments`, `storages`, `profiles`, `dsh-ops`, `bili-duty`, `dsh-runtimes`, the Electron `harness` directory and `.credentials.yaml`) are reported as protected and never touched.
 
 ## Tools
 
@@ -80,6 +87,8 @@ Example override in the profile:
 | `conversation_delete` | Plan or delete archived sessions; `includeArtifacts` adds attachments/projection cache; `includeTempDirs` adds time-window temp dirs. |
 | `workspace_status` | Report configured workspace roots and stale direct children. |
 | `workspace_clean` | Remove stale direct children; archive roots are gated. |
+| `system_cache_status` | Read-only inventory of the system-cache catalog, protected dirs and age-gated candidates. |
+| `system_cache_clean` | Plan or delete system-cache candidates (manual only; dry-run by default). |
 
 ## CLI
 
@@ -93,6 +102,8 @@ node bin/dsh-cache-clean.mjs --conversations
 node bin/dsh-cache-clean.mjs --delete-archived all --apply --confirm
 node bin/dsh-cache-clean.mjs --workspace-status
 node bin/dsh-cache-clean.mjs --workspace-clean --apply --confirm
+node bin/dsh-cache-clean.mjs --system-status --json
+node bin/dsh-cache-clean.mjs --system-clean --apply --confirm
 ```
 
 Offline registry edits (when the host is not running) require `--offline-registry`; the CLI writes a timestamped `.bak-<ms>` before touching `workspace.json`, and refuses without the flag.
@@ -104,10 +115,12 @@ Offline registry edits (when the host is not running) require `--offline-registr
 - The host has no session-delete API; deletion removes the log directory and then uses `unarchiveSession` + detach on the workspace registry. Untracked/ghost sessions have no registry entry to clean.
 - The settings panel talks to `/api/cache-cleaner.api` (a Fetch route registered by the host half). Direct unauthenticated HTTP probes receive `401` from the host's browser-auth fence even when the route exists; verification is done in the browser with the signed cookie.
 - Cleanup verifies that free space actually increased; on systems whose delete implementation moves files to the recycle bin, the report warns instead of claiming success.
+- The system-cache catalog is fixed in code. A directory that is absent is reported as `exists:false` instead of being treated as an error; the CLI has no host config, so it reports `INSTALLED_VERSION_UNKNOWN` for updater packages and leaves them untouched.
 
 ## Tests
 
 ```sh
+node test/smoke-v6.mjs     # 41 assertions (system caches; includes fake-ctx tool mount)
 node test/smoke-v4.mjs     # 116 assertions
 node test/smoke-v3.mjs     # 88
 node test/smoke-v2.mjs     # 77

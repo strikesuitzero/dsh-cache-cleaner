@@ -220,7 +220,7 @@ async function main() {
     ok('Z0 connection.fetch.register 只调用一次', ctxPack.fetchRoutes.length === 1 && typeof route?.fetch === 'function', String(ctxPack.fetchRoutes.length));
 
     // ---------------------------------------------------------------- Z1/Z6
-    eq('Z1 工具数量', ctxPack.tools.size, 7);
+    eq('Z1 工具数量', ctxPack.tools.size, 9);
     for (const name of [
       'cache_status',
       'cache_clean',
@@ -409,7 +409,7 @@ async function main() {
     const noConnCtx = makeCtx({ withFetch: false });
     await mod.apply(noConnCtx.ctx, baseConfig);
     eq('Z6 无 connection 时不挂载', noConnCtx.fetchRoutes.length, 0);
-    eq('Z6 无 connection 时工具照常注册', noConnCtx.tools.size, 7);
+    eq('Z6 无 connection 时工具照常注册', noConnCtx.tools.size, 9);
 
     // cordis 对未 inject 的服务做直接属性访问会抛：只能经 ctx.get 取（host-plugin.md 可选服务写法）。
     const strictCtx = makeCtx({ withFetch: true });
